@@ -1,0 +1,15 @@
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\bin\Debug\net9.0\tictactoe.exe
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\bin\Debug\net9.0\tictactoe.deps.json
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\bin\Debug\net9.0\tictactoe.runtimeconfig.json
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\bin\Debug\net9.0\tictactoe.dll
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\bin\Debug\net9.0\tictactoe.pdb
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\obj\Debug\net9.0\tictactoe.GeneratedMSBuildEditorConfig.editorconfig
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\obj\Debug\net9.0\tictactoe.AssemblyInfoInputs.cache
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\obj\Debug\net9.0\tictactoe.AssemblyInfo.cs
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\obj\Debug\net9.0\tictactoe.csproj.CoreCompileInputs.cache
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\obj\Debug\net9.0\tictactoe.sourcelink.json
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\obj\Debug\net9.0\tictactoe.dll
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\obj\Debug\net9.0\refint\tictactoe.dll
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\obj\Debug\net9.0\tictactoe.pdb
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\obj\Debug\net9.0\tictactoe.genruntimeconfig.cache
+H:\2.ročník\PVA\github\Tic-Tac-Toe-Csharp\tictactoe\tictactoe\obj\Debug\net9.0\ref\tictactoe.dll
