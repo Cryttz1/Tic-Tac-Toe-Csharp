@@ -30,7 +30,7 @@ class MainForm : Form
 
     const int FORM_W    = 540;
     const int BOARD_X   = 20;
-    const int BOARD_TOP = 290;
+    const int BOARD_TOP = 340; // Posunuto níže kvůli panelům s nastavením
     const int CELL_SIZE = 110;
     const int GAP       = 8;
     const int BTN_H     = 40;
@@ -42,7 +42,7 @@ class MainForm : Form
     CellButton[] cells = null!;
     Label lblTurn = null!, lblScoreX = null!, lblScoreO = null!, lblDraws = null!;
     Button btnReset = null!, btnResetAll = null!;
-    Panel boardPanel = null!, sizePanel = null!, modePanel = null!;
+    Panel boardPanel = null!, sizePanel = null!, modePanel = null!, diffPanel = null!;
 
     // Čára vítěze
     bool   lineActive = false;
@@ -55,7 +55,6 @@ class MainForm : Form
     {
         engine = new GameEngine();
         
-        // OPRAVA: Odstraněna předpona "On", aby se názvy shodovaly s GameEngine
         engine.MoveMade += Engine_OnMoveMade;
         engine.GameWon += Engine_OnGameWon;
         engine.GameDrawn += Engine_OnGameDrawn;
@@ -67,7 +66,7 @@ class MainForm : Form
 
     void InitializeStaticUI()
     {
-        Text = "Neon Tic Tac Toe";
+        Text = "Neon Tic Tac Toe (Minimax Edition)";
         BackColor = BG;
         ForeColor = TEXT_LIGHT;
         Font = new Font("Segoe UI", 10f);
@@ -114,7 +113,6 @@ class MainForm : Form
             var btn = new ToggleButton(sizeLabels[i], gs == engine.GridSize) { Bounds = new Rectangle(90 + i * 104, 0, 92, 44), Tag = gs };
             btn.Click += (s, e) =>
             {
-                // OPRAVA: Bezpečné přetypování pomocí pattern matchingu
                 if (s is ToggleButton tb && tb.Tag is int ns)
                 {
                     if (ns == engine.GridSize) return;
@@ -140,11 +138,11 @@ class MainForm : Form
             var btn = new ToggleButton(modeLabels[i], isVsPc == engine.VsComputer) { Bounds = new Rectangle(90 + i * 144, 0, 134, 44), Tag = isVsPc };
             btn.Click += (s, e) =>
             {
-                // OPRAVA: Bezpečné přetypování pomocí pattern matchingu
                 if (s is ToggleButton tb && tb.Tag is bool vsPc)
                 {
                     if (vsPc == engine.VsComputer) return;
                     engine.VsComputer = vsPc;
+                    diffPanel.Visible = vsPc; // Zobrazí/skryje obtížnost
                     ResetScores();
                     UpdateActiveButtons(modePanel, vsPc);
                     ApplySettings();
@@ -153,13 +151,39 @@ class MainForm : Form
             modePanel.Controls.Add(btn);
         }
 
+        // ─── Panel obtížnosti
+        diffPanel = new Panel { Bounds = new Rectangle(BOARD_X, 248, FORM_W - BOARD_X * 2, 44), BackColor = Color.Transparent, Visible = engine.VsComputer };
+        Controls.Add(diffPanel);
+        diffPanel.Controls.Add(new Label { Text = "Obtížnost:", Font = new Font("Segoe UI", 10f), ForeColor = TEXT_MUTED, AutoSize = true, Location = new Point(0, 12) });
+        
+        string[] diffLabels = { "Lehká", "Střední", "Těžká" };
+        GameEngine.Difficulty[] diffVals = { GameEngine.Difficulty.Lehka, GameEngine.Difficulty.Stredni, GameEngine.Difficulty.Tezka };
+        
+        for (int i = 0; i < 3; i++)
+        {
+            var dVal = diffVals[i];
+            var btn = new ToggleButton(diffLabels[i], dVal == engine.AiDifficulty) { Bounds = new Rectangle(90 + i * 104, 0, 92, 44), Tag = dVal };
+            btn.Click += (s, e) =>
+            {
+                if (s is ToggleButton tb && tb.Tag is GameEngine.Difficulty nd)
+                {
+                    if (nd == engine.AiDifficulty) return;
+                    engine.AiDifficulty = nd;
+                    ResetScores();
+                    UpdateActiveButtons(diffPanel, nd);
+                    ApplySettings();
+                }
+            };
+            diffPanel.Controls.Add(btn);
+        }
+
         // ─── Ukazatel tahu
         lblTurn = new Label
         {
             Text = "Hráč X je na tahu", Font = new Font("Segoe UI", 12f),
             ForeColor = X_COLOR, AutoSize = false,
             TextAlign = ContentAlignment.MiddleCenter,
-            Bounds = new Rectangle(0, 248, FORM_W, 30), BackColor = Color.Transparent
+            Bounds = new Rectangle(0, 300, FORM_W, 30), BackColor = Color.Transparent
         };
         Controls.Add(lblTurn);
 
@@ -224,7 +248,6 @@ class MainForm : Form
         }
     }
 
-    // ─── Reakce na události z Engine ───
     void Engine_OnMoveMade(int index, char player)
     {
         AudioHelper.PlayClick();
@@ -250,12 +273,8 @@ class MainForm : Form
         Color wColor = winner == 'X' ? X_COLOR : O_COLOR;
         lblTurn.ForeColor = wColor;
 
-        // Ztmavení nevyhrávajících buněk
         for (int i = 0; i < cells.Length; i++)
-        {
-            if (!winLine.Contains(i))
-                cells[i].Dim();
-        }
+            if (!winLine.Contains(i)) cells[i].Dim();
 
         StartLine(winLine, wColor);
     }
@@ -269,20 +288,13 @@ class MainForm : Form
         lblTurn.ForeColor = TEXT_MUTED;
     }
 
-    void ResetScores()
-    {
-        scoreX = scoreO = draws = 0;
-        UpdateScoreLabels();
-    }
+    void ResetScores() { scoreX = scoreO = draws = 0; UpdateScoreLabels(); }
 
     void UpdateScoreLabels()
     {
-        lblScoreX.Text = $"X\n{scoreX}";
-        lblScoreO.Text = $"O\n{scoreO}";
-        lblDraws.Text  = $"REMÍZY\n{draws}";
+        lblScoreX.Text = $"X\n{scoreX}"; lblScoreO.Text = $"O\n{scoreO}"; lblDraws.Text  = $"REMÍZY\n{draws}";
     }
 
-    // ─── Animace Výherní čáry (Neon Efekt) ───
     public void DrawWinningLine(Graphics g, int offsetX, int offsetY)
     {
         if (!lineActive || lineProgress <= 0f) return;
@@ -341,27 +353,14 @@ class MainForm : Form
         Invalidate(true);
     }
 
-    protected override void OnPaint(PaintEventArgs e)
-    {
-        base.OnPaint(e);
-        DrawWinningLine(e.Graphics, 0, 0);
-    }
+    protected override void OnPaint(PaintEventArgs e) { base.OnPaint(e); DrawWinningLine(e.Graphics, 0, 0); }
 
-    Label MakeScoreLabel(string text, Color color, Rectangle bounds) => new Label
-    {
-        Text = text, Font = new Font("Segoe UI", 13f, FontStyle.Bold), ForeColor = color,
-        BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleCenter, AutoSize = false, Bounds = bounds
-    };
+    Label MakeScoreLabel(string text, Color color, Rectangle bounds) => new Label { Text = text, Font = new Font("Segoe UI", 13f, FontStyle.Bold), ForeColor = color, BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleCenter, AutoSize = false, Bounds = bounds };
 
     Button MakeButton(string text, Rectangle bounds)
     {
-        var btn = new FlatButton
-        {
-            Text = text, Bounds = bounds, ForeColor = TEXT_LIGHT, BackColor = PANEL_BG,
-            Font = new Font("Segoe UI", 10f), FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
-        };
-        btn.FlatAppearance.BorderColor = BORDER; btn.FlatAppearance.BorderSize = 1;
-        btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(35, 40, 50);
+        var btn = new FlatButton { Text = text, Bounds = bounds, ForeColor = TEXT_LIGHT, BackColor = PANEL_BG, Font = new Font("Segoe UI", 10f), FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand };
+        btn.FlatAppearance.BorderColor = BORDER; btn.FlatAppearance.BorderSize = 1; btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(35, 40, 50);
         return btn;
     }
 
@@ -383,7 +382,7 @@ class MainForm : Form
     }
 }
 
-// ─── ZVUKOVÝ MANAŽER (Beep přes Task, aby neblokoval UI) ─────────────────────
+// ─── ZVUKOVÝ MANAŽER ─────────────────────────────────────────────────────────
 static class AudioHelper
 {
     public static void PlayClick() => Task.Run(() => Console.Beep(800, 40));
@@ -391,11 +390,15 @@ static class AudioHelper
     public static void PlayDraw() => Task.Run(() => { Console.Beep(300, 200); Console.Beep(250, 300); });
 }
 
-// ─── HERNÍ LOGIKA (Oddělený Game Engine) ─────────────────────────────────────
+// ─── HERNÍ LOGIKA S AGRESIVNÍM MINIMAXEM (Heuristika) ────────────────────────
 class GameEngine
 {
+    public enum Difficulty { Lehka, Stredni, Tezka }
+    
     public int GridSize { get; set; } = 3;
     public bool VsComputer { get; set; } = true;
+    public Difficulty AiDifficulty { get; set; } = Difficulty.Stredni;
+    
     public int WinLength => GridSize == 3 ? 3 : 4; 
 
     char[] board = Array.Empty<char>();
@@ -404,7 +407,6 @@ class GameEngine
     bool isAiThinking = false;
     Random rnd = new Random();
 
-    // OPRAVA: Přidány otazníky pro povolení Nullable událostí
     public event Action<int, char>? MoveMade;
     public event Action<int[], char>? GameWon;
     public event Action? GameDrawn;
@@ -428,8 +430,11 @@ class GameEngine
         if (!gameOver && VsComputer && currentPlayer == 'O')
         {
             isAiThinking = true;
-            await Task.Delay(400); 
-            if(!gameOver) ComputerMove();
+            await Task.Delay(150); 
+            
+            int move = await Task.Run(() => ComputeBestMove()); 
+            
+            if(!gameOver && move != -1) MakeMove(move);
             isAiThinking = false;
         }
     }
@@ -439,7 +444,7 @@ class GameEngine
         board[index] = currentPlayer;
         MoveMade?.Invoke(index, currentPlayer);
 
-        int[]? winLine = CheckWin();
+        int[]? winLine = CheckWin(board);
         if (winLine != null)
         {
             gameOver = true;
@@ -457,27 +462,36 @@ class GameEngine
         }
     }
 
-    void ComputerMove()
+    int ComputeBestMove()
     {
-        int move = FindBestMove('O'); 
-        if (move == -1) move = FindBestMove('X'); 
-        if (move == -1) 
-        {
-            var empty = board.Select((c, i) => new { c, i }).Where(x => x.c == '\0').Select(x => x.i).ToList();
-            if (empty.Count > 0) move = empty[rnd.Next(empty.Count)];
-        }
-        
-        if (move != -1) MakeMove(move);
+        if (AiDifficulty == Difficulty.Lehka) return GetRandomMove();
+
+        int move = FindImmediateMove('O'); 
+        if (move != -1) return move;
+        move = FindImmediateMove('X'); 
+        if (move != -1) return move;
+
+        if (AiDifficulty == Difficulty.Stredni) return GetRandomMove();
+
+        // Těžká obtížnost - Minimax s heuristikou pro hlubší předvídání
+        int maxDepth = GridSize == 3 ? 9 : (GridSize == 4 ? 4 : 3);
+        return GetMinimaxMove(maxDepth);
     }
 
-    int FindBestMove(char playerSymbol)
+    int GetRandomMove()
+    {
+        var empty = board.Select((c, i) => new { c, i }).Where(x => x.c == '\0').Select(x => x.i).ToList();
+        return empty.Count > 0 ? empty[rnd.Next(empty.Count)] : -1;
+    }
+
+    int FindImmediateMove(char playerSymbol)
     {
         for (int i = 0; i < board.Length; i++)
         {
             if (board[i] == '\0')
             {
                 board[i] = playerSymbol; 
-                bool isWinning = CheckWin() != null;
+                bool isWinning = CheckWin(board) != null;
                 board[i] = '\0'; 
                 if (isWinning) return i;
             }
@@ -485,8 +499,135 @@ class GameEngine
         return -1;
     }
 
-    // OPRAVA: Metoda teď vrací nullable pole int[]?
-    int[]? CheckWin()
+    // --- AGRESIVNÍ MINIMAX ---
+    int GetMinimaxMove(int maxDepth)
+    {
+        int bestScore = int.MinValue;
+        List<int> bestMoves = new List<int>();
+        int alpha = int.MinValue;
+        int beta = int.MaxValue;
+        
+        for (int i = 0; i < board.Length; i++)
+        {
+            if (board[i] == '\0')
+            {
+                board[i] = 'O';
+                int score = MinimaxLoop(board, 0, false, alpha, beta, maxDepth);
+                board[i] = '\0';
+                
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestMoves.Clear();
+                    bestMoves.Add(i);
+                }
+                else if (score == bestScore)
+                {
+                    bestMoves.Add(i);
+                }
+            }
+        }
+        return bestMoves.Count > 0 ? bestMoves[rnd.Next(bestMoves.Count)] : GetRandomMove();
+    }
+
+    int MinimaxLoop(char[] tempBoard, int depth, bool isMaximizing, int alpha, int beta, int maxDepth)
+    {
+        int[]? win = CheckWin(tempBoard);
+        if (win != null)
+        {
+            char winner = tempBoard[win[0]];
+            // Skóre 10000 zaručí, že čistá výhra/prohra převálcuje všechno ostatní
+            if (winner == 'O') return 10000 - depth;
+            if (winner == 'X') return -10000 + depth;
+        }
+        if (tempBoard.All(c => c != '\0')) return 0; 
+        
+        if (depth >= maxDepth) return EvaluateBoard(tempBoard);
+
+        if (isMaximizing)
+        {
+            int maxEval = int.MinValue;
+            for (int i = 0; i < tempBoard.Length; i++)
+            {
+                if (tempBoard[i] == '\0')
+                {
+                    tempBoard[i] = 'O';
+                    int eval = MinimaxLoop(tempBoard, depth + 1, false, alpha, beta, maxDepth);
+                    tempBoard[i] = '\0';
+                    maxEval = Math.Max(maxEval, eval);
+                    alpha = Math.Max(alpha, eval);
+                    if (beta <= alpha) break; 
+                }
+            }
+            return maxEval;
+        }
+        else
+        {
+            int minEval = int.MaxValue;
+            for (int i = 0; i < tempBoard.Length; i++)
+            {
+                if (tempBoard[i] == '\0')
+                {
+                    tempBoard[i] = 'X';
+                    int eval = MinimaxLoop(tempBoard, depth + 1, true, alpha, beta, maxDepth);
+                    tempBoard[i] = '\0';
+                    minEval = Math.Min(minEval, eval);
+                    beta = Math.Min(beta, eval);
+                    if (beta <= alpha) break; 
+                }
+            }
+            return minEval;
+        }
+    }
+
+    int EvaluateBoard(char[] state)
+    {
+        int score = 0;
+        int[] dx = { 1, 0, 1, -1 };
+        int[] dy = { 0, 1, 1, 1 };
+
+        for (int y = 0; y < GridSize; y++)
+        {
+            for (int x = 0; x < GridSize; x++)
+            {
+                for (int d = 0; d < 4; d++)
+                {
+                    int oCount = 0;
+                    int xCount = 0;
+                    bool outOfBounds = false;
+
+                    for (int k = 0; k < WinLength; k++)
+                    {
+                        int nx = x + dx[d] * k;
+                        int ny = y + dy[d] * k;
+                        if (nx < 0 || ny < 0 || nx >= GridSize || ny >= GridSize) { outOfBounds = true; break; }
+                        
+                        char c = state[ny * GridSize + nx];
+                        if (c == 'O') oCount++;
+                        else if (c == 'X') xCount++;
+                    }
+
+                    if (outOfBounds) continue;
+
+                    if (oCount > 0 && xCount == 0)
+                    {
+                        if (oCount == WinLength - 1) score += 50;
+                        else if (oCount == WinLength - 2) score += 10;
+                        else score += 1;
+                    }
+                    else if (xCount > 0 && oCount == 0)
+                    {
+                        if (xCount == WinLength - 1) score -= 60; 
+                        else if (xCount == WinLength - 2) score -= 12;
+                        else score -= 1;
+                    }
+                }
+            }
+        }
+        return score;
+    }
+
+    int[]? CheckWin(char[] state)
     {
         int[] dx = { 1, 0, 1, -1 };
         int[] dy = { 0, 1, 1, 1 };
@@ -496,8 +637,8 @@ class GameEngine
             for (int x = 0; x < GridSize; x++)
             {
                 int idx = y * GridSize + x;
-                if (board[idx] == '\0') continue;
-                char c = board[idx];
+                if (state[idx] == '\0') continue;
+                char c = state[idx];
 
                 for (int d = 0; d < 4; d++)
                 {
@@ -509,7 +650,7 @@ class GameEngine
                         int ny = y + dy[d] * k;
                         if (nx < 0 || ny < 0 || nx >= GridSize || ny >= GridSize) { match = false; break; }
                         int nidx = ny * GridSize + nx;
-                        if (board[nidx] != c) { match = false; break; }
+                        if (state[nidx] != c) { match = false; break; }
                         line[k] = nidx;
                     }
                     if (match) return line;
@@ -520,14 +661,13 @@ class GameEngine
     }
 }
 
-// ─── CUSTOM CONTROLS (Tlačítka buněk a nastavení) ────────────────────────────
+// ─── CUSTOM CONTROLS ─────────────────────────────────────────────────────────
 class CellButton : Control
 {
     static readonly Color BG_NORMAL  = Color.FromArgb(22, 27, 34);
     static readonly Color BG_HOVER   = Color.FromArgb(30, 38, 50);
     static readonly Color BORDER_CLR = Color.FromArgb(48, 54, 61);
 
-    // OPRAVA: Přidány otazníky pro povolení Nullable
     public event Action<int>? CellClicked;
     public Action<Graphics, int, int>? DrawOverlay;
 
@@ -600,8 +740,7 @@ class CellButton : Control
             }
         }
 
-        if (Parent != null && !isDimmed)
-            DrawOverlay?.Invoke(g, -(Parent.Left + Left), -(Parent.Top + Top));
+        if (Parent != null && !isDimmed) DrawOverlay?.Invoke(g, -(Parent.Left + Left), -(Parent.Top + Top));
     }
 }
 
