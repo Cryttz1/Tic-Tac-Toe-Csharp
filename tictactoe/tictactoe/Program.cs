@@ -1,6 +1,9 @@
 ﻿using System;
+using System.Collections.Generic;
 using System.Drawing;
 using System.Drawing.Drawing2D;
+using System.Linq;
+using System.Threading.Tasks;
 using System.Windows.Forms;
 
 static class Program
@@ -14,6 +17,7 @@ static class Program
     }
 }
 
+// ─── HLAVNÍ FORMULÁŘ (Uživatelské rozhraní) ──────────────────────────────────
 class MainForm : Form
 {
     static readonly Color BG         = Color.FromArgb(13,  17,  23);
@@ -26,39 +30,44 @@ class MainForm : Form
 
     const int FORM_W    = 540;
     const int BOARD_X   = 20;
-    const int BOARD_TOP = 234;
+    const int BOARD_TOP = 290;
     const int CELL_SIZE = 110;
     const int GAP       = 8;
     const int BTN_H     = 40;
     const int BOTTOM    = 12;
 
-    int gridSize = 3;
-    char[] board;
-    char currentPlayer = 'X';
-    bool gameOver = false;
+    GameEngine engine;
     int scoreX = 0, scoreO = 0, draws = 0;
 
-    CellButton[] cells;
-    Label lblTurn, lblScoreX, lblScoreO, lblDraws;
-    Button btnReset, btnResetAll;
-    Panel boardPanel, sizePanel;
+    CellButton[] cells = null!;
+    Label lblTurn = null!, lblScoreX = null!, lblScoreO = null!, lblDraws = null!;
+    Button btnReset = null!, btnResetAll = null!;
+    Panel boardPanel = null!, sizePanel = null!, modePanel = null!;
 
     // Čára vítěze
     bool   lineActive = false;
-    PointF lineFrom, lineTo;   // souřadnice v prostoru ClientRectangle formu
+    PointF lineFrom, lineTo;
     Color  lineColor;
     float  lineProgress = 0f;
-    Timer  lineTimer;
+    Timer? lineTimer;
 
     public MainForm()
     {
+        engine = new GameEngine();
+        
+        // OPRAVA: Odstraněna předpona "On", aby se názvy shodovaly s GameEngine
+        engine.MoveMade += Engine_OnMoveMade;
+        engine.GameWon += Engine_OnGameWon;
+        engine.GameDrawn += Engine_OnGameDrawn;
+        engine.TurnChanged += Engine_OnTurnChanged;
+
         InitializeStaticUI();
-        ApplyGridSize();
+        ApplySettings();
     }
 
     void InitializeStaticUI()
     {
-        Text = "Tic Tac Toe";
+        Text = "Neon Tic Tac Toe";
         BackColor = BG;
         ForeColor = TEXT_LIGHT;
         Font = new Font("Segoe UI", 10f);
@@ -77,6 +86,7 @@ class MainForm : Form
             BackColor = Color.Transparent
         });
 
+        // ─── Skóre
         var scoreBox = new Panel { Bounds = new Rectangle(BOARD_X, 68, FORM_W - BOARD_X * 2, 66), BackColor = PANEL_BG };
         scoreBox.Paint += (s, e) => DrawRoundedBorder(e.Graphics, scoreBox.ClientRectangle, BORDER, 10);
         Controls.Add(scoreBox);
@@ -91,61 +101,91 @@ class MainForm : Form
         scoreBox.Controls.Add(new Panel { Bounds = new Rectangle(sw,     8, 1, 50), BackColor = BORDER });
         scoreBox.Controls.Add(new Panel { Bounds = new Rectangle(sw*2+1, 8, 1, 50), BackColor = BORDER });
 
+        // ─── Panel velikosti mřížky
         sizePanel = new Panel { Bounds = new Rectangle(BOARD_X, 144, FORM_W - BOARD_X * 2, 44), BackColor = Color.Transparent };
         Controls.Add(sizePanel);
-        sizePanel.Controls.Add(new Label
-        {
-            Text = "Velikost:", Font = new Font("Segoe UI", 10f), ForeColor = TEXT_MUTED,
-            AutoSize = true, Location = new Point(0, 12), BackColor = Color.Transparent
-        });
+        sizePanel.Controls.Add(new Label { Text = "Velikost:", Font = new Font("Segoe UI", 10f), ForeColor = TEXT_MUTED, AutoSize = true, Location = new Point(0, 12) });
+        
         string[] sizeLabels = { "3 × 3", "4 × 4", "5 × 5" };
         int[]    gridSizes  = { 3, 4, 5 };
         for (int i = 0; i < 3; i++)
         {
             int gs = gridSizes[i];
-            var btn = new SizeButton(sizeLabels[i], gs == gridSize)
-            {
-                Bounds = new Rectangle(90 + i * 104, 0, 92, 44), Tag = gs
-            };
+            var btn = new ToggleButton(sizeLabels[i], gs == engine.GridSize) { Bounds = new Rectangle(90 + i * 104, 0, 92, 44), Tag = gs };
             btn.Click += (s, e) =>
             {
-                int ns = (int)((SizeButton)s).Tag;
-                if (ns == gridSize) return;
-                gridSize = ns;
-                scoreX = scoreO = draws = 0;
-                UpdateScoreLabels();
-                foreach (Control c in sizePanel.Controls)
-                    if (c is SizeButton sb) sb.SetActive((int)sb.Tag == gridSize);
-                ApplyGridSize();
+                // OPRAVA: Bezpečné přetypování pomocí pattern matchingu
+                if (s is ToggleButton tb && tb.Tag is int ns)
+                {
+                    if (ns == engine.GridSize) return;
+                    engine.GridSize = ns;
+                    ResetScores();
+                    UpdateActiveButtons(sizePanel, ns);
+                    ApplySettings();
+                }
             };
             sizePanel.Controls.Add(btn);
         }
 
+        // ─── Panel herního módu
+        modePanel = new Panel { Bounds = new Rectangle(BOARD_X, 196, FORM_W - BOARD_X * 2, 44), BackColor = Color.Transparent };
+        Controls.Add(modePanel);
+        modePanel.Controls.Add(new Label { Text = "Režim:", Font = new Font("Segoe UI", 10f), ForeColor = TEXT_MUTED, AutoSize = true, Location = new Point(0, 12) });
+        
+        string[] modeLabels = { "1 Hráč (vs PC)", "2 Hráči" };
+        bool[]   modeValues = { true, false };
+        for (int i = 0; i < 2; i++)
+        {
+            bool isVsPc = modeValues[i];
+            var btn = new ToggleButton(modeLabels[i], isVsPc == engine.VsComputer) { Bounds = new Rectangle(90 + i * 144, 0, 134, 44), Tag = isVsPc };
+            btn.Click += (s, e) =>
+            {
+                // OPRAVA: Bezpečné přetypování pomocí pattern matchingu
+                if (s is ToggleButton tb && tb.Tag is bool vsPc)
+                {
+                    if (vsPc == engine.VsComputer) return;
+                    engine.VsComputer = vsPc;
+                    ResetScores();
+                    UpdateActiveButtons(modePanel, vsPc);
+                    ApplySettings();
+                }
+            };
+            modePanel.Controls.Add(btn);
+        }
+
+        // ─── Ukazatel tahu
         lblTurn = new Label
         {
             Text = "Hráč X je na tahu", Font = new Font("Segoe UI", 12f),
             ForeColor = X_COLOR, AutoSize = false,
             TextAlign = ContentAlignment.MiddleCenter,
-            Bounds = new Rectangle(0, 196, FORM_W, 30), BackColor = Color.Transparent
+            Bounds = new Rectangle(0, 248, FORM_W, 30), BackColor = Color.Transparent
         };
         Controls.Add(lblTurn);
 
         boardPanel = new Panel { BackColor = Color.Transparent };
         Controls.Add(boardPanel);
 
+        // ─── Tlačítka resetu
         btnReset = MakeButton("Nová hra (stejné skóre)", Rectangle.Empty);
-        btnReset.Click += (s, e) => ResetBoard();
+        btnReset.Click += (s, e) => { StopLine(); engine.ResetGame(); };
         Controls.Add(btnReset);
 
         btnResetAll = MakeButton("Resetovat vše", Rectangle.Empty);
         btnResetAll.ForeColor = TEXT_MUTED;
-        btnResetAll.Click += (s, e) => { scoreX = scoreO = draws = 0; UpdateScoreLabels(); ResetBoard(); };
+        btnResetAll.Click += (s, e) => { ResetScores(); StopLine(); engine.ResetGame(); };
         Controls.Add(btnResetAll);
     }
 
-    void ApplyGridSize()
+    void UpdateActiveButtons(Panel p, object activeTag)
     {
-        int n  = gridSize;
+        foreach (Control c in p.Controls)
+            if (c is ToggleButton tb) tb.SetActive(tb.Tag?.Equals(activeTag) == true);
+    }
+
+    void ApplySettings()
+    {
+        int n  = engine.GridSize;
         int bW = FORM_W - BOARD_X * 2;
         int bH = n * CELL_SIZE + (n - 1) * GAP;
         int btnY = BOARD_TOP + bH + 12;
@@ -155,19 +195,13 @@ class MainForm : Form
         MinimumSize = MaximumSize = Size;
 
         boardPanel.Bounds = new Rectangle(BOARD_X, BOARD_TOP, bW, bH);
-
         int halfW = (bW - 8) / 2;
         btnReset.Bounds    = new Rectangle(BOARD_X,             btnY, halfW, BTN_H);
         btnResetAll.Bounds = new Rectangle(BOARD_X + halfW + 8, btnY, halfW, BTN_H);
 
         StopLine();
         BuildCells(n, bW, bH);
-
-        currentPlayer = 'X';
-        gameOver = false;
-        board = new char[n * n];
-        lblTurn.Text = "Hráč X je na tahu";
-        lblTurn.ForeColor = X_COLOR;
+        engine.ResetGame();
     }
 
     void BuildCells(int n, int bW, int bH)
@@ -184,62 +218,75 @@ class MainForm : Form
                 Bounds = new Rectangle(col * (cellW + GAP), row * (cellH + GAP), cellW, cellH),
                 DrawOverlay = DrawWinningLine
             };
-            cell.CellClicked += OnCellClicked;
+            cell.CellClicked += (idx) => engine.Play(idx);
             cells[i] = cell;
             boardPanel.Controls.Add(cell);
         }
     }
 
-    void OnCellClicked(int index)
+    // ─── Reakce na události z Engine ───
+    void Engine_OnMoveMade(int index, char player)
     {
-        if (gameOver || board[index] != '\0') return;
-        board[index] = currentPlayer;
-        Color pc = currentPlayer == 'X' ? X_COLOR : O_COLOR;
-        cells[index].SetSymbol(currentPlayer, pc);
-
-        int[] winLine = CheckWin();
-        if (winLine != null)
-        {
-            gameOver = true;
-            if (currentPlayer == 'X') scoreX++; else scoreO++;
-            UpdateScoreLabels();
-            StartLine(winLine, pc);
-            lblTurn.Text = $"🎉  Hráč {currentPlayer} vyhrál!";
-            lblTurn.ForeColor = pc;
-        }
-        else if (IsDraw())
-        {
-            gameOver = true; draws++;
-            UpdateScoreLabels();
-            lblTurn.Text = "🤝  Remíza!";
-            lblTurn.ForeColor = TEXT_MUTED;
-        }
-        else
-        {
-            currentPlayer = currentPlayer == 'X' ? 'O' : 'X';
-            lblTurn.Text = $"Hráč {currentPlayer} je na tahu";
-            lblTurn.ForeColor = currentPlayer == 'X' ? X_COLOR : O_COLOR;
-        }
+        AudioHelper.PlayClick();
+        Color pc = player == 'X' ? X_COLOR : O_COLOR;
+        cells[index].SetSymbol(player, pc);
     }
 
-    void ResetBoard()
+    void Engine_OnTurnChanged(char player)
     {
-        board = new char[gridSize * gridSize];
-        currentPlayer = 'X'; gameOver = false;
-        StopLine();
-        foreach (var c in cells) c.Reset();
-        lblTurn.Text = "Hráč X je na tahu";
-        lblTurn.ForeColor = X_COLOR;
-        Invalidate(true);
+        int wLen = engine.WinLength;
+        string goal = engine.GridSize > 3 ? $" (Cíl: Spoj {wLen})" : "";
+        lblTurn.Text = $"Hráč {player} je na tahu" + goal;
+        lblTurn.ForeColor = player == 'X' ? X_COLOR : O_COLOR;
     }
 
-    // ── Čára: animuje přes timer a překresluje standardně v cyklu WinForms ──
+    void Engine_OnGameWon(int[] winLine, char winner)
+    {
+        if (winner == 'X') scoreX++; else scoreO++;
+        UpdateScoreLabels();
+        AudioHelper.PlayWin();
+
+        lblTurn.Text = $"🎉  Hráč {winner} vyhrál!";
+        Color wColor = winner == 'X' ? X_COLOR : O_COLOR;
+        lblTurn.ForeColor = wColor;
+
+        // Ztmavení nevyhrávajících buněk
+        for (int i = 0; i < cells.Length; i++)
+        {
+            if (!winLine.Contains(i))
+                cells[i].Dim();
+        }
+
+        StartLine(winLine, wColor);
+    }
+
+    void Engine_OnGameDrawn()
+    {
+        draws++;
+        UpdateScoreLabels();
+        AudioHelper.PlayDraw();
+        lblTurn.Text = "🤝  Remíza!";
+        lblTurn.ForeColor = TEXT_MUTED;
+    }
+
+    void ResetScores()
+    {
+        scoreX = scoreO = draws = 0;
+        UpdateScoreLabels();
+    }
+
+    void UpdateScoreLabels()
+    {
+        lblScoreX.Text = $"X\n{scoreX}";
+        lblScoreO.Text = $"O\n{scoreO}";
+        lblDraws.Text  = $"REMÍZY\n{draws}";
+    }
+
+    // ─── Animace Výherní čáry (Neon Efekt) ───
     public void DrawWinningLine(Graphics g, int offsetX, int offsetY)
     {
         if (!lineActive || lineProgress <= 0f) return;
         g.SmoothingMode = SmoothingMode.AntiAlias;
-
-        // Posuneme souřadnice, abychom kreslili správně i uvnitř samotné buňky
         g.TranslateTransform(offsetX, offsetY);
 
         float ex = lineFrom.X + (lineTo.X - lineFrom.X) * lineProgress;
@@ -247,25 +294,21 @@ class MainForm : Form
         var end = new PointF(ex, ey);
         var c = lineColor;
 
-        using (var gp = new Pen(Color.FromArgb(60, c.R, c.G, c.B), 28f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-            g.DrawLine(gp, lineFrom, end);
+        using (var g1 = new Pen(Color.FromArgb(15, c.R, c.G, c.B), 40f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(g1, lineFrom, end);
+        using (var g2 = new Pen(Color.FromArgb(35, c.R, c.G, c.B), 26f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(g2, lineFrom, end);
+        using (var g3 = new Pen(Color.FromArgb(120, c.R, c.G, c.B), 14f) { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(g3, lineFrom, end);
+        using (var g4 = new Pen(Color.FromArgb(255, 255, 255, 255), 3f)  { StartCap = LineCap.Round, EndCap = LineCap.Round }) g.DrawLine(g4, lineFrom, end);
 
-        using (var gm = new Pen(Color.FromArgb(160, c.R, c.G, c.B), 12f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-            g.DrawLine(gm, lineFrom, end);
-
-        using (var pw = new Pen(Color.FromArgb(240, 255, 255, 255), 3.5f) { StartCap = LineCap.Round, EndCap = LineCap.Round })
-            g.DrawLine(pw, lineFrom, end);
-
-        g.TranslateTransform(-offsetX, -offsetY); // Reset transformace
+        g.TranslateTransform(-offsetX, -offsetY);
     }
 
     void StartLine(int[] line, Color color)
     {
-        int n = gridSize;
+        int n = engine.GridSize;
         int bW = boardPanel.Width, bH = boardPanel.Height;
         int cellW = (bW - GAP * (n - 1)) / n;
         int cellH = (bH - GAP * (n - 1)) / n;
-        int fi = line[0], li = line[line.Length - 1];
+        int fi = line[0], li = line[line[line.Length - 1] == 0 ? 0 : line.Length - 1]; 
 
         float bx0 = (fi % n) * (cellW + GAP) + cellW / 2f;
         float by0 = (fi / n) * (cellH + GAP) + cellH / 2f;
@@ -282,8 +325,8 @@ class MainForm : Form
         lineTimer = new Timer { Interval = 16 };
         lineTimer.Tick += (s, e) =>
         {
-            lineProgress = Math.Min(1f, lineProgress + 0.06f);
-            Invalidate(true); // Přinutí překreslit formulář i všechny buňky (hladká animace)
+            lineProgress = Math.Min(1f, lineProgress + 0.05f);
+            Invalidate(true);
             if (lineProgress >= 1f) lineTimer.Stop();
         };
         lineTimer.Start();
@@ -294,72 +337,30 @@ class MainForm : Form
         lineTimer?.Stop();
         lineActive = false;
         lineProgress = 0f;
+        if (cells != null) foreach (var c in cells) c.Reset();
         Invalidate(true);
     }
 
     protected override void OnPaint(PaintEventArgs e)
     {
         base.OnPaint(e);
-        // Vykreslí čáru na pozadí formuláře (díky tomu čára překryje prázdné mezery mezi tlačítky)
         DrawWinningLine(e.Graphics, 0, 0);
-    }
-
-    int[] CheckWin()
-    {
-        int n = gridSize;
-        for (int r = 0; r < n; r++)
-        {
-            var line = new int[n];
-            for (int c = 0; c < n; c++) line[c] = r * n + c;
-            if (AllSame(line)) return line;
-        }
-        for (int c = 0; c < n; c++)
-        {
-            var line = new int[n];
-            for (int r = 0; r < n; r++) line[r] = r * n + c;
-            if (AllSame(line)) return line;
-        }
-        var d1 = new int[n]; for (int i = 0; i < n; i++) d1[i] = i * n + i;
-        if (AllSame(d1)) return d1;
-        var d2 = new int[n]; for (int i = 0; i < n; i++) d2[i] = i * n + (n - 1 - i);
-        if (AllSame(d2)) return d2;
-        return null;
-    }
-
-    bool AllSame(int[] idx)
-    {
-        char f = board[idx[0]];
-        if (f == '\0') return false;
-        foreach (int i in idx) if (board[i] != f) return false;
-        return true;
-    }
-
-    bool IsDraw() { foreach (var c in board) if (c == '\0') return false; return true; }
-
-    void UpdateScoreLabels()
-    {
-        lblScoreX.Text = $"X\n{scoreX}";
-        lblScoreO.Text = $"O\n{scoreO}";
-        lblDraws.Text  = $"REMÍZY\n{draws}";
     }
 
     Label MakeScoreLabel(string text, Color color, Rectangle bounds) => new Label
     {
-        Text = text, Font = new Font("Segoe UI", 13f, FontStyle.Bold),
-        ForeColor = color, BackColor = Color.Transparent,
-        TextAlign = ContentAlignment.MiddleCenter, AutoSize = false, Bounds = bounds
+        Text = text, Font = new Font("Segoe UI", 13f, FontStyle.Bold), ForeColor = color,
+        BackColor = Color.Transparent, TextAlign = ContentAlignment.MiddleCenter, AutoSize = false, Bounds = bounds
     };
 
     Button MakeButton(string text, Rectangle bounds)
     {
         var btn = new FlatButton
         {
-            Text = text, Bounds = bounds, ForeColor = TEXT_LIGHT,
-            BackColor = PANEL_BG, Font = new Font("Segoe UI", 10f),
-            FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
+            Text = text, Bounds = bounds, ForeColor = TEXT_LIGHT, BackColor = PANEL_BG,
+            Font = new Font("Segoe UI", 10f), FlatStyle = FlatStyle.Flat, Cursor = Cursors.Hand
         };
-        btn.FlatAppearance.BorderColor = BORDER;
-        btn.FlatAppearance.BorderSize = 1;
+        btn.FlatAppearance.BorderColor = BORDER; btn.FlatAppearance.BorderSize = 1;
         btn.FlatAppearance.MouseOverBackColor = Color.FromArgb(35, 40, 50);
         return btn;
     }
@@ -367,12 +368,11 @@ class MainForm : Form
     static void DrawRoundedBorder(Graphics g, Rectangle r, Color color, int radius)
     {
         g.SmoothingMode = SmoothingMode.AntiAlias;
-        using var pen = new Pen(color, 1f);
-        using var path = RoundRect(r, radius);
+        using var pen = new Pen(color, 1f); using var path = RoundRect(r, radius);
         g.DrawPath(pen, path);
     }
 
-    static GraphicsPath RoundRect(Rectangle r, int radius)
+    public static GraphicsPath RoundRect(Rectangle r, int radius)
     {
         var p = new GraphicsPath();
         p.AddArc(r.X, r.Y, radius * 2, radius * 2, 180, 90);
@@ -383,22 +383,161 @@ class MainForm : Form
     }
 }
 
-// ─── Buňka herní desky ────────────────────────────────────────────────────────
+// ─── ZVUKOVÝ MANAŽER (Beep přes Task, aby neblokoval UI) ─────────────────────
+static class AudioHelper
+{
+    public static void PlayClick() => Task.Run(() => Console.Beep(800, 40));
+    public static void PlayWin() => Task.Run(() => { Console.Beep(523, 100); Console.Beep(659, 100); Console.Beep(784, 100); Console.Beep(1046, 250); });
+    public static void PlayDraw() => Task.Run(() => { Console.Beep(300, 200); Console.Beep(250, 300); });
+}
+
+// ─── HERNÍ LOGIKA (Oddělený Game Engine) ─────────────────────────────────────
+class GameEngine
+{
+    public int GridSize { get; set; } = 3;
+    public bool VsComputer { get; set; } = true;
+    public int WinLength => GridSize == 3 ? 3 : 4; 
+
+    char[] board = Array.Empty<char>();
+    char currentPlayer = 'X';
+    bool gameOver = false;
+    bool isAiThinking = false;
+    Random rnd = new Random();
+
+    // OPRAVA: Přidány otazníky pro povolení Nullable událostí
+    public event Action<int, char>? MoveMade;
+    public event Action<int[], char>? GameWon;
+    public event Action? GameDrawn;
+    public event Action<char>? TurnChanged;
+
+    public void ResetGame()
+    {
+        board = new char[GridSize * GridSize];
+        currentPlayer = 'X';
+        gameOver = false;
+        isAiThinking = false;
+        TurnChanged?.Invoke(currentPlayer);
+    }
+
+    public async void Play(int index)
+    {
+        if (gameOver || isAiThinking || board[index] != '\0') return;
+
+        MakeMove(index);
+
+        if (!gameOver && VsComputer && currentPlayer == 'O')
+        {
+            isAiThinking = true;
+            await Task.Delay(400); 
+            if(!gameOver) ComputerMove();
+            isAiThinking = false;
+        }
+    }
+
+    void MakeMove(int index)
+    {
+        board[index] = currentPlayer;
+        MoveMade?.Invoke(index, currentPlayer);
+
+        int[]? winLine = CheckWin();
+        if (winLine != null)
+        {
+            gameOver = true;
+            GameWon?.Invoke(winLine, currentPlayer);
+        }
+        else if (board.All(c => c != '\0'))
+        {
+            gameOver = true;
+            GameDrawn?.Invoke();
+        }
+        else
+        {
+            currentPlayer = currentPlayer == 'X' ? 'O' : 'X';
+            TurnChanged?.Invoke(currentPlayer);
+        }
+    }
+
+    void ComputerMove()
+    {
+        int move = FindBestMove('O'); 
+        if (move == -1) move = FindBestMove('X'); 
+        if (move == -1) 
+        {
+            var empty = board.Select((c, i) => new { c, i }).Where(x => x.c == '\0').Select(x => x.i).ToList();
+            if (empty.Count > 0) move = empty[rnd.Next(empty.Count)];
+        }
+        
+        if (move != -1) MakeMove(move);
+    }
+
+    int FindBestMove(char playerSymbol)
+    {
+        for (int i = 0; i < board.Length; i++)
+        {
+            if (board[i] == '\0')
+            {
+                board[i] = playerSymbol; 
+                bool isWinning = CheckWin() != null;
+                board[i] = '\0'; 
+                if (isWinning) return i;
+            }
+        }
+        return -1;
+    }
+
+    // OPRAVA: Metoda teď vrací nullable pole int[]?
+    int[]? CheckWin()
+    {
+        int[] dx = { 1, 0, 1, -1 };
+        int[] dy = { 0, 1, 1, 1 };
+
+        for (int y = 0; y < GridSize; y++)
+        {
+            for (int x = 0; x < GridSize; x++)
+            {
+                int idx = y * GridSize + x;
+                if (board[idx] == '\0') continue;
+                char c = board[idx];
+
+                for (int d = 0; d < 4; d++)
+                {
+                    int[] line = new int[WinLength];
+                    bool match = true;
+                    for (int k = 0; k < WinLength; k++)
+                    {
+                        int nx = x + dx[d] * k;
+                        int ny = y + dy[d] * k;
+                        if (nx < 0 || ny < 0 || nx >= GridSize || ny >= GridSize) { match = false; break; }
+                        int nidx = ny * GridSize + nx;
+                        if (board[nidx] != c) { match = false; break; }
+                        line[k] = nidx;
+                    }
+                    if (match) return line;
+                }
+            }
+        }
+        return null;
+    }
+}
+
+// ─── CUSTOM CONTROLS (Tlačítka buněk a nastavení) ────────────────────────────
 class CellButton : Control
 {
     static readonly Color BG_NORMAL  = Color.FromArgb(22, 27, 34);
     static readonly Color BG_HOVER   = Color.FromArgb(30, 38, 50);
     static readonly Color BORDER_CLR = Color.FromArgb(48, 54, 61);
 
-    public event Action<int> CellClicked;
-    public Action<Graphics, int, int> DrawOverlay;
+    // OPRAVA: Přidány otazníky pro povolení Nullable
+    public event Action<int>? CellClicked;
+    public Action<Graphics, int, int>? DrawOverlay;
 
     readonly int index;
     char symbol = '\0';
     Color symbolColor = Color.White;
     bool isHovered = false;
+    bool isDimmed = false;
     float drawProgress = 0f;
-    Timer drawTimer;
+    Timer? drawTimer;
 
     public CellButton(int index)
     {
@@ -412,37 +551,25 @@ class CellButton : Control
         symbol = sym; symbolColor = color; drawProgress = 0f;
         drawTimer?.Stop();
         drawTimer = new Timer { Interval = 16 };
-        drawTimer.Tick += (s, e) =>
-        {
-            drawProgress = Math.Min(1f, drawProgress + 0.08f);
-            Invalidate();
-            if (drawProgress >= 1f) drawTimer.Stop();
-        };
-        drawTimer.Start(); Invalidate();
+        drawTimer.Tick += (s, e) => { drawProgress = Math.Min(1f, drawProgress + 0.08f); Invalidate(); if (drawProgress >= 1f) drawTimer?.Stop(); };
+        drawTimer.Start();
     }
 
-    public void Reset()
-    {
-        symbol = '\0'; drawProgress = 0f;
-        drawTimer?.Stop(); Invalidate();
-    }
+    public void Dim() { isDimmed = true; isHovered = false; Invalidate(); }
+    public void Reset() { symbol = '\0'; drawProgress = 0f; isDimmed = false; isHovered = false; drawTimer?.Stop(); Invalidate(); }
 
-    protected override void OnMouseEnter(EventArgs e) { isHovered = true;  Invalidate(); }
+    protected override void OnMouseEnter(EventArgs e) { if(!isDimmed) isHovered = true; Invalidate(); }
     protected override void OnMouseLeave(EventArgs e) { isHovered = false; Invalidate(); }
-    protected override void OnClick(EventArgs e) => CellClicked?.Invoke(index);
+    protected override void OnClick(EventArgs e) { if (!isDimmed) CellClicked?.Invoke(index); }
 
     protected override void OnPaint(PaintEventArgs e)
     {
-        var g = e.Graphics;
-        g.SmoothingMode = SmoothingMode.AntiAlias;
-        g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAlias;
+        var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
         var r = ClientRectangle;
 
         Color bg = isHovered && symbol == '\0' ? BG_HOVER : BG_NORMAL;
-        using (var b = new SolidBrush(bg))
-        using (var path = RR(r, 10)) g.FillPath(b, path);
-        using (var pen = new Pen(BORDER_CLR, 1f))
-        using (var path = RR(r, 10)) g.DrawPath(pen, path);
+        using (var b = new SolidBrush(bg)) using (var path = MainForm.RoundRect(r, 10)) g.FillPath(b, path);
+        using (var pen = new Pen(BORDER_CLR, 1f)) using (var path = MainForm.RoundRect(r, 10)) g.DrawPath(pen, path);
 
         if (symbol != '\0')
         {
@@ -450,49 +577,35 @@ class CellButton : Control
             float size = Math.Min(r.Width, r.Height) * 0.32f;
             float sw = Math.Max(2.5f, size * 0.15f);
 
-            using var pen2 = new Pen(Color.FromArgb((int)(255 * drawProgress), symbolColor), sw)
-                { StartCap = LineCap.Round, EndCap = LineCap.Round };
+            int alpha = isDimmed ? 30 : (int)(255 * drawProgress);
+            using var pen2 = new Pen(Color.FromArgb(alpha, symbolColor), sw) { StartCap = LineCap.Round, EndCap = LineCap.Round };
 
             if (symbol == 'X')
             {
-                if (drawProgress <= 0.5f)
+                if (drawProgress <= 0.5f && !isDimmed)
                 {
                     float p = drawProgress * 2f;
                     g.DrawLine(pen2, cx - size, cy - size, cx - size + 2 * size * p, cy - size + 2 * size * p);
                 }
                 else
                 {
-                    float p2 = (drawProgress - 0.5f) * 2f;
+                    float p2 = isDimmed ? 1f : (drawProgress - 0.5f) * 2f;
                     g.DrawLine(pen2, cx - size, cy - size, cx + size, cy + size);
                     g.DrawLine(pen2, cx + size, cy - size, cx + size - 2 * size * p2, cy - size + 2 * size * p2);
                 }
             }
             else
             {
-                g.DrawArc(pen2, cx - size, cy - size, size * 2, size * 2, -90, 360f * drawProgress);
+                g.DrawArc(pen2, cx - size, cy - size, size * 2, size * 2, -90, isDimmed ? 360f : 360f * drawProgress);
             }
         }
 
-        // Nakreslí výherní čáru, pokud tudy prochází
-        if (Parent != null)
-        {
+        if (Parent != null && !isDimmed)
             DrawOverlay?.Invoke(g, -(Parent.Left + Left), -(Parent.Top + Top));
-        }
-    }
-
-    static GraphicsPath RR(Rectangle r, int rad)
-    {
-        var p = new GraphicsPath();
-        p.AddArc(r.X, r.Y, rad * 2, rad * 2, 180, 90);
-        p.AddArc(r.Right - rad * 2, r.Y, rad * 2, rad * 2, 270, 90);
-        p.AddArc(r.Right - rad * 2, r.Bottom - rad * 2, rad * 2, rad * 2, 0, 90);
-        p.AddArc(r.X, r.Bottom - rad * 2, rad * 2, rad * 2, 90, 90);
-        p.CloseFigure(); return p;
     }
 }
 
-// ─── Tlačítko výběru velikosti ────────────────────────────────────────────────
-class SizeButton : Control
+class ToggleButton : Control
 {
     static readonly Color BG_ACT = Color.FromArgb(28, 78, 148);
     static readonly Color BG_IN  = Color.FromArgb(22, 27, 34);
@@ -504,7 +617,7 @@ class SizeButton : Control
     bool active;
     readonly string label;
 
-    public SizeButton(string label, bool active)
+    public ToggleButton(string label, bool active)
     {
         this.label = label; this.active = active;
         DoubleBuffered = true; Cursor = Cursors.Hand;
@@ -517,23 +630,11 @@ class SizeButton : Control
     {
         var g = e.Graphics; g.SmoothingMode = SmoothingMode.AntiAlias;
         var r = ClientRectangle;
-        using (var b = new SolidBrush(active ? BG_ACT : BG_IN))
-        using (var path = RR(r, 8)) g.FillPath(b, path);
-        using (var pen = new Pen(active ? BD_ACT : BD_IN, active ? 1.5f : 1f))
-        using (var path = RR(r, 8)) g.DrawPath(pen, path);
+        using (var b = new SolidBrush(active ? BG_ACT : BG_IN)) using (var path = MainForm.RoundRect(r, 8)) g.FillPath(b, path);
+        using (var pen = new Pen(active ? BD_ACT : BD_IN, active ? 1.5f : 1f)) using (var path = MainForm.RoundRect(r, 8)) g.DrawPath(pen, path);
         using var sf = new StringFormat { Alignment = StringAlignment.Center, LineAlignment = StringAlignment.Center };
         using var font = new Font("Segoe UI", 10f, active ? FontStyle.Bold : FontStyle.Regular);
         g.DrawString(label, font, new SolidBrush(active ? TX_ACT : TX_IN), r, sf);
-    }
-
-    static GraphicsPath RR(Rectangle r, int rad)
-    {
-        var p = new GraphicsPath();
-        p.AddArc(r.X, r.Y, rad * 2, rad * 2, 180, 90);
-        p.AddArc(r.Right - rad * 2, r.Y, rad * 2, rad * 2, 270, 90);
-        p.AddArc(r.Right - rad * 2, r.Bottom - rad * 2, rad * 2, rad * 2, 0, 90);
-        p.AddArc(r.X, r.Bottom - rad * 2, rad * 2, rad * 2, 90, 90);
-        p.CloseFigure(); return p;
     }
 }
 
