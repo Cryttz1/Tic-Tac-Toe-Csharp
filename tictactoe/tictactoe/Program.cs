@@ -30,7 +30,7 @@ class MainForm : Form
 
     const int FORM_W    = 540;
     const int BOARD_X   = 20;
-    const int BOARD_TOP = 340; // Posunuto níže kvůli panelům s nastavením
+    const int BOARD_TOP = 392; 
     const int CELL_SIZE = 110;
     const int GAP       = 8;
     const int BTN_H     = 40;
@@ -42,9 +42,8 @@ class MainForm : Form
     CellButton[] cells = null!;
     Label lblTurn = null!, lblScoreX = null!, lblScoreO = null!, lblDraws = null!;
     Button btnReset = null!, btnResetAll = null!;
-    Panel boardPanel = null!, sizePanel = null!, modePanel = null!, diffPanel = null!;
+    Panel boardPanel = null!, sizePanel = null!, modePanel = null!, diffPanel = null!, startPanel = null!;
 
-    // Čára vítěze
     bool   lineActive = false;
     PointF lineFrom, lineTo;
     Color  lineColor;
@@ -142,7 +141,7 @@ class MainForm : Form
                 {
                     if (vsPc == engine.VsComputer) return;
                     engine.VsComputer = vsPc;
-                    diffPanel.Visible = vsPc; // Zobrazí/skryje obtížnost
+                    diffPanel.Visible = vsPc; 
                     ResetScores();
                     UpdateActiveButtons(modePanel, vsPc);
                     ApplySettings();
@@ -177,13 +176,38 @@ class MainForm : Form
             diffPanel.Controls.Add(btn);
         }
 
+        // ─── Panel: Kdo začíná
+        startPanel = new Panel { Bounds = new Rectangle(BOARD_X, 300, FORM_W - BOARD_X * 2, 44), BackColor = Color.Transparent };
+        Controls.Add(startPanel);
+        startPanel.Controls.Add(new Label { Text = "Začíná:", Font = new Font("Segoe UI", 10f), ForeColor = TEXT_MUTED, AutoSize = true, Location = new Point(0, 12) });
+        
+        string[] startLabels = { "Hráč X", "Hráč O" };
+        char[] startVals = { 'X', 'O' };
+        for (int i = 0; i < 2; i++)
+        {
+            char sVal = startVals[i];
+            var btn = new ToggleButton(startLabels[i], sVal == engine.StartingPlayer) { Bounds = new Rectangle(90 + i * 104, 0, 92, 44), Tag = sVal };
+            btn.Click += (s, e) =>
+            {
+                if (s is ToggleButton tb && tb.Tag is char ns)
+                {
+                    if (ns == engine.StartingPlayer) return;
+                    engine.StartingPlayer = ns;
+                    ResetScores();
+                    UpdateActiveButtons(startPanel, ns);
+                    ApplySettings();
+                }
+            };
+            startPanel.Controls.Add(btn);
+        }
+
         // ─── Ukazatel tahu
         lblTurn = new Label
         {
             Text = "Hráč X je na tahu", Font = new Font("Segoe UI", 12f),
             ForeColor = X_COLOR, AutoSize = false,
             TextAlign = ContentAlignment.MiddleCenter,
-            Bounds = new Rectangle(0, 300, FORM_W, 30), BackColor = Color.Transparent
+            Bounds = new Rectangle(0, 352, FORM_W, 30), BackColor = Color.Transparent
         };
         Controls.Add(lblTurn);
 
@@ -390,7 +414,7 @@ static class AudioHelper
     public static void PlayDraw() => Task.Run(() => { Console.Beep(300, 200); Console.Beep(250, 300); });
 }
 
-// ─── HERNÍ LOGIKA S AGRESIVNÍM MINIMAXEM (Heuristika) ────────────────────────
+// ─── HERNÍ LOGIKA (Plně Thread-Safe) ─────────────────────────────────────────
 class GameEngine
 {
     public enum Difficulty { Lehka, Stredni, Tezka }
@@ -398,6 +422,7 @@ class GameEngine
     public int GridSize { get; set; } = 3;
     public bool VsComputer { get; set; } = true;
     public Difficulty AiDifficulty { get; set; } = Difficulty.Stredni;
+    public char StartingPlayer { get; set; } = 'X';
     
     public int WinLength => GridSize == 3 ? 3 : 4; 
 
@@ -405,20 +430,26 @@ class GameEngine
     char currentPlayer = 'X';
     bool gameOver = false;
     bool isAiThinking = false;
-    Random rnd = new Random();
+    int gameVersion = 0; // Nové: Verzování hry pro ochranu vláken
 
     public event Action<int, char>? MoveMade;
     public event Action<int[], char>? GameWon;
     public event Action? GameDrawn;
     public event Action<char>? TurnChanged;
 
-    public void ResetGame()
+    public async void ResetGame()
     {
+        gameVersion++; // Pokud běží staré AI vlákno, tahle změna verze ho tiše zabije
         board = new char[GridSize * GridSize];
-        currentPlayer = 'X';
+        currentPlayer = StartingPlayer;
         gameOver = false;
         isAiThinking = false;
         TurnChanged?.Invoke(currentPlayer);
+
+        if (VsComputer && currentPlayer == 'O')
+        {
+            await TriggerComputerMoveAsync();
+        }
     }
 
     public async void Play(int index)
@@ -429,14 +460,26 @@ class GameEngine
 
         if (!gameOver && VsComputer && currentPlayer == 'O')
         {
-            isAiThinking = true;
-            await Task.Delay(150); 
-            
-            int move = await Task.Run(() => ComputeBestMove()); 
-            
-            if(!gameOver && move != -1) MakeMove(move);
-            isAiThinking = false;
+            await TriggerComputerMoveAsync();
         }
+    }
+
+    async Task TriggerComputerMoveAsync()
+    {
+        isAiThinking = true;
+        await Task.Delay(150); 
+        
+        int currentVersion = gameVersion;
+        char[] boardCopy = (char[])board.Clone(); // Thread-safe snapshot
+        
+        int move = await Task.Run(() => ComputeBestMove(boardCopy)); 
+        
+        // Pokud uživatel mezitím restartoval hru nebo změnil pole, výpočet ignorujeme
+        if (currentVersion == gameVersion && !gameOver)
+        {
+            if(move != -1 && board[move] == '\0') MakeMove(move);
+        }
+        isAiThinking = false;
     }
 
     void MakeMove(int index)
@@ -462,58 +505,60 @@ class GameEngine
         }
     }
 
-    int ComputeBestMove()
+    // AI metody nyní operují VÝHRADNĚ s předaným lokalizovaným polem (currentBoard)
+    int ComputeBestMove(char[] currentBoard)
     {
-        if (AiDifficulty == Difficulty.Lehka) return GetRandomMove();
+        Random localRnd = new Random(); // Vlastní instance Random pro bezpečnost vláken
 
-        int move = FindImmediateMove('O'); 
+        if (AiDifficulty == Difficulty.Lehka) return GetRandomMove(currentBoard, localRnd);
+
+        int move = FindImmediateMove(currentBoard, 'O'); 
         if (move != -1) return move;
-        move = FindImmediateMove('X'); 
+        move = FindImmediateMove(currentBoard, 'X'); 
         if (move != -1) return move;
 
-        if (AiDifficulty == Difficulty.Stredni) return GetRandomMove();
+        if (AiDifficulty == Difficulty.Stredni) return GetRandomMove(currentBoard, localRnd);
 
-        // Těžká obtížnost - Minimax s heuristikou pro hlubší předvídání
-        int maxDepth = GridSize == 3 ? 9 : (GridSize == 4 ? 4 : 3);
-        return GetMinimaxMove(maxDepth);
+        int size = (int)Math.Sqrt(currentBoard.Length);
+        int maxDepth = size == 3 ? 9 : (size == 4 ? 4 : 3);
+        return GetMinimaxMove(currentBoard, maxDepth, localRnd);
     }
 
-    int GetRandomMove()
+    int GetRandomMove(char[] currentBoard, Random rnd)
     {
-        var empty = board.Select((c, i) => new { c, i }).Where(x => x.c == '\0').Select(x => x.i).ToList();
+        var empty = currentBoard.Select((c, i) => new { c, i }).Where(x => x.c == '\0').Select(x => x.i).ToList();
         return empty.Count > 0 ? empty[rnd.Next(empty.Count)] : -1;
     }
 
-    int FindImmediateMove(char playerSymbol)
+    int FindImmediateMove(char[] currentBoard, char playerSymbol)
     {
-        for (int i = 0; i < board.Length; i++)
+        for (int i = 0; i < currentBoard.Length; i++)
         {
-            if (board[i] == '\0')
+            if (currentBoard[i] == '\0')
             {
-                board[i] = playerSymbol; 
-                bool isWinning = CheckWin(board) != null;
-                board[i] = '\0'; 
+                currentBoard[i] = playerSymbol; 
+                bool isWinning = CheckWin(currentBoard) != null;
+                currentBoard[i] = '\0'; 
                 if (isWinning) return i;
             }
         }
         return -1;
     }
 
-    // --- AGRESIVNÍ MINIMAX ---
-    int GetMinimaxMove(int maxDepth)
+    int GetMinimaxMove(char[] currentBoard, int maxDepth, Random rnd)
     {
         int bestScore = int.MinValue;
         List<int> bestMoves = new List<int>();
         int alpha = int.MinValue;
         int beta = int.MaxValue;
         
-        for (int i = 0; i < board.Length; i++)
+        for (int i = 0; i < currentBoard.Length; i++)
         {
-            if (board[i] == '\0')
+            if (currentBoard[i] == '\0')
             {
-                board[i] = 'O';
-                int score = MinimaxLoop(board, 0, false, alpha, beta, maxDepth);
-                board[i] = '\0';
+                currentBoard[i] = 'O';
+                int score = MinimaxLoop(currentBoard, 0, false, alpha, beta, maxDepth);
+                currentBoard[i] = '\0';
                 
                 if (score > bestScore)
                 {
@@ -527,7 +572,7 @@ class GameEngine
                 }
             }
         }
-        return bestMoves.Count > 0 ? bestMoves[rnd.Next(bestMoves.Count)] : GetRandomMove();
+        return bestMoves.Count > 0 ? bestMoves[rnd.Next(bestMoves.Count)] : GetRandomMove(currentBoard, rnd);
     }
 
     int MinimaxLoop(char[] tempBoard, int depth, bool isMaximizing, int alpha, int beta, int maxDepth)
@@ -536,7 +581,6 @@ class GameEngine
         if (win != null)
         {
             char winner = tempBoard[win[0]];
-            // Skóre 10000 zaručí, že čistá výhra/prohra převálcuje všechno ostatní
             if (winner == 'O') return 10000 - depth;
             if (winner == 'X') return -10000 + depth;
         }
@@ -583,12 +627,14 @@ class GameEngine
     int EvaluateBoard(char[] state)
     {
         int score = 0;
+        int size = (int)Math.Sqrt(state.Length);
+        int winLen = size == 3 ? 3 : 4;
         int[] dx = { 1, 0, 1, -1 };
         int[] dy = { 0, 1, 1, 1 };
 
-        for (int y = 0; y < GridSize; y++)
+        for (int y = 0; y < size; y++)
         {
-            for (int x = 0; x < GridSize; x++)
+            for (int x = 0; x < size; x++)
             {
                 for (int d = 0; d < 4; d++)
                 {
@@ -596,13 +642,13 @@ class GameEngine
                     int xCount = 0;
                     bool outOfBounds = false;
 
-                    for (int k = 0; k < WinLength; k++)
+                    for (int k = 0; k < winLen; k++)
                     {
                         int nx = x + dx[d] * k;
                         int ny = y + dy[d] * k;
-                        if (nx < 0 || ny < 0 || nx >= GridSize || ny >= GridSize) { outOfBounds = true; break; }
+                        if (nx < 0 || ny < 0 || nx >= size || ny >= size) { outOfBounds = true; break; }
                         
-                        char c = state[ny * GridSize + nx];
+                        char c = state[ny * size + nx];
                         if (c == 'O') oCount++;
                         else if (c == 'X') xCount++;
                     }
@@ -611,14 +657,14 @@ class GameEngine
 
                     if (oCount > 0 && xCount == 0)
                     {
-                        if (oCount == WinLength - 1) score += 50;
-                        else if (oCount == WinLength - 2) score += 10;
+                        if (oCount == winLen - 1) score += 50;
+                        else if (oCount == winLen - 2) score += 10;
                         else score += 1;
                     }
                     else if (xCount > 0 && oCount == 0)
                     {
-                        if (xCount == WinLength - 1) score -= 60; 
-                        else if (xCount == WinLength - 2) score -= 12;
+                        if (xCount == winLen - 1) score -= 60; 
+                        else if (xCount == winLen - 2) score -= 12;
                         else score -= 1;
                     }
                 }
@@ -629,27 +675,29 @@ class GameEngine
 
     int[]? CheckWin(char[] state)
     {
+        int size = (int)Math.Sqrt(state.Length);
+        int winLen = size == 3 ? 3 : 4;
         int[] dx = { 1, 0, 1, -1 };
         int[] dy = { 0, 1, 1, 1 };
 
-        for (int y = 0; y < GridSize; y++)
+        for (int y = 0; y < size; y++)
         {
-            for (int x = 0; x < GridSize; x++)
+            for (int x = 0; x < size; x++)
             {
-                int idx = y * GridSize + x;
+                int idx = y * size + x;
                 if (state[idx] == '\0') continue;
                 char c = state[idx];
 
                 for (int d = 0; d < 4; d++)
                 {
-                    int[] line = new int[WinLength];
+                    int[] line = new int[winLen];
                     bool match = true;
-                    for (int k = 0; k < WinLength; k++)
+                    for (int k = 0; k < winLen; k++)
                     {
                         int nx = x + dx[d] * k;
                         int ny = y + dy[d] * k;
-                        if (nx < 0 || ny < 0 || nx >= GridSize || ny >= GridSize) { match = false; break; }
-                        int nidx = ny * GridSize + nx;
+                        if (nx < 0 || ny < 0 || nx >= size || ny >= size) { match = false; break; }
+                        int nidx = ny * size + nx;
                         if (state[nidx] != c) { match = false; break; }
                         line[k] = nidx;
                     }
