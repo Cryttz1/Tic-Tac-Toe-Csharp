@@ -30,7 +30,7 @@ class MainForm : Form
 
     const int FORM_W    = 540;
     const int BOARD_X   = 20;
-    const int BOARD_TOP = 392; 
+    const int BOARD_TOP = 444; // Posunuto dolů kvůli novému panelu
     const int CELL_SIZE = 110;
     const int GAP       = 8;
     const int BTN_H     = 40;
@@ -42,13 +42,17 @@ class MainForm : Form
     CellButton[] cells = null!;
     Label lblTurn = null!, lblScoreX = null!, lblScoreO = null!, lblDraws = null!;
     Button btnReset = null!, btnResetAll = null!;
-    Panel boardPanel = null!, sizePanel = null!, modePanel = null!, diffPanel = null!, startPanel = null!;
+    Panel boardPanel = null!, sizePanel = null!, modePanel = null!, diffPanel = null!, startPanel = null!, timerPanel = null!;
 
     bool   lineActive = false;
     PointF lineFrom, lineTo;
     Color  lineColor;
     float  lineProgress = 0f;
     Timer? lineTimer;
+
+    // Nové: Správa herního odpočtu
+    Timer? turnTimer;
+    int remainingSeconds;
 
     public MainForm()
     {
@@ -58,6 +62,10 @@ class MainForm : Form
         engine.GameWon += Engine_OnGameWon;
         engine.GameDrawn += Engine_OnGameDrawn;
         engine.TurnChanged += Engine_OnTurnChanged;
+
+        // Inicializace tikání časovače
+        turnTimer = new Timer { Interval = 1000 };
+        turnTimer.Tick += TurnTimer_Tick;
 
         InitializeStaticUI();
         ApplySettings();
@@ -201,13 +209,38 @@ class MainForm : Form
             startPanel.Controls.Add(btn);
         }
 
+        // ─── Nové: Panel nastavení časovače
+        timerPanel = new Panel { Bounds = new Rectangle(BOARD_X, 352, FORM_W - BOARD_X * 2, 44), BackColor = Color.Transparent };
+        Controls.Add(timerPanel);
+        timerPanel.Controls.Add(new Label { Text = "Časovač:", Font = new Font("Segoe UI", 10f), ForeColor = TEXT_MUTED, AutoSize = true, Location = new Point(0, 12) });
+
+        string[] timerLabels = { "Vypnuto", "3 s", "5 s", "10 s" };
+        int[] timerVals = { 0, 3, 5, 10 };
+        for (int i = 0; i < 4; i++)
+        {
+            int tVal = timerVals[i];
+            var btn = new ToggleButton(timerLabels[i], tVal == engine.TurnTimeoutSeconds) { Bounds = new Rectangle(90 + i * 84, 0, 78, 44), Tag = tVal };
+            btn.Click += (s, e) =>
+            {
+                if (s is ToggleButton tb && tb.Tag is int nt)
+                {
+                    if (nt == engine.TurnTimeoutSeconds) return;
+                    engine.TurnTimeoutSeconds = nt;
+                    ResetScores();
+                    UpdateActiveButtons(timerPanel, nt);
+                    ApplySettings();
+                }
+            };
+            timerPanel.Controls.Add(btn);
+        }
+
         // ─── Ukazatel tahu
         lblTurn = new Label
         {
             Text = "Hráč X je na tahu", Font = new Font("Segoe UI", 12f),
             ForeColor = X_COLOR, AutoSize = false,
             TextAlign = ContentAlignment.MiddleCenter,
-            Bounds = new Rectangle(0, 352, FORM_W, 30), BackColor = Color.Transparent
+            Bounds = new Rectangle(0, 404, FORM_W, 30), BackColor = Color.Transparent
         };
         Controls.Add(lblTurn);
 
@@ -279,16 +312,60 @@ class MainForm : Form
         cells[index].SetSymbol(player, pc);
     }
 
-    void Engine_OnTurnChanged(char player)
+    // Nové: Logika tikání odpočtu kaźdou sekundu
+    void TurnTimer_Tick(object? sender, EventArgs e)
     {
+        if (engine.TurnTimeoutSeconds <= 0 || engine.IsGameOver) return;
+
+        remainingSeconds--;
+        UpdateTurnLabel();
+
+        if (remainingSeconds <= 0)
+        {
+            turnTimer?.Stop();
+            engine.ForceRandomMove(); // Čas vypršel -> engine vybere náhodný tah
+        }
+    }
+
+    // Nové: Sjednocené překreslování stavového textu
+    void UpdateTurnLabel()
+    {
+        char player = engine.CurrentPlayer;
         int wLen = engine.WinLength;
         string goal = engine.GridSize > 3 ? $" (Cíl: Spoj {wLen})" : "";
-        lblTurn.Text = $"Hráč {player} je na tahu" + goal;
+        
+        bool isAiThinking = engine.VsComputer && player == 'O';
+        string timerStr = (engine.TurnTimeoutSeconds > 0 && !isAiThinking) ? $" [{remainingSeconds}s]" : "";
+
+        if (isAiThinking)
+        {
+            lblTurn.Text = "🤖 Počítač přemýšlí...";
+        }
+        else
+        {
+            lblTurn.Text = $"Hráč {player} je na tahu" + goal + timerStr;
+        }
         lblTurn.ForeColor = player == 'X' ? X_COLOR : O_COLOR;
+    }
+
+    void Engine_OnTurnChanged(char player)
+    {
+        turnTimer?.Stop();
+        
+        // Spustíme odpočet pouze pokud je zapnutý, hra neskončila a zrovna nehraje AI
+        bool isAiTurn = engine.VsComputer && player == 'O';
+        if (engine.TurnTimeoutSeconds > 0 && !engine.IsGameOver && !isAiTurn)
+        {
+            remainingSeconds = engine.TurnTimeoutSeconds;
+            turnTimer?.Start();
+        }
+
+        UpdateTurnLabel();
     }
 
     void Engine_OnGameWon(int[] winLine, char winner)
     {
+        turnTimer?.Stop();
         if (winner == 'X') scoreX++; else scoreO++;
         UpdateScoreLabels();
         AudioHelper.PlayWin();
@@ -305,6 +382,7 @@ class MainForm : Form
 
     void Engine_OnGameDrawn()
     {
+        turnTimer?.Stop();
         draws++;
         UpdateScoreLabels();
         AudioHelper.PlayDraw();
@@ -370,6 +448,7 @@ class MainForm : Form
 
     void StopLine()
     {
+        turnTimer?.Stop();
         lineTimer?.Stop();
         lineActive = false;
         lineProgress = 0f;
@@ -424,13 +503,18 @@ class GameEngine
     public Difficulty AiDifficulty { get; set; } = Difficulty.Stredni;
     public char StartingPlayer { get; set; } = 'X';
     
+    // Nové: Vlastnosti pro veřejný přístup z MainForm
+    public int TurnTimeoutSeconds { get; set; } = 0; // 0 znamená vypnuto
+    public char CurrentPlayer => currentPlayer;
+    public bool IsGameOver => gameOver;
+    public bool IsAiThinking => isAiThinking;
     public int WinLength => GridSize == 3 ? 3 : 4; 
 
     char[] board = Array.Empty<char>();
     char currentPlayer = 'X';
     bool gameOver = false;
     bool isAiThinking = false;
-    int gameVersion = 0; // Nové: Verzování hry pro ochranu vláken
+    int gameVersion = 0; 
 
     public event Action<int, char>? MoveMade;
     public event Action<int[], char>? GameWon;
@@ -439,7 +523,7 @@ class GameEngine
 
     public async void ResetGame()
     {
-        gameVersion++; // Pokud běží staré AI vlákno, tahle změna verze ho tiše zabije
+        gameVersion++; 
         board = new char[GridSize * GridSize];
         currentPlayer = StartingPlayer;
         gameOver = false;
@@ -464,17 +548,29 @@ class GameEngine
         }
     }
 
+    // Nové: Metoda pro vynucení náhodného tahu při vypršení časovače
+    public void ForceRandomMove()
+    {
+        if (gameOver || isAiThinking) return;
+
+        Random localRnd = new Random();
+        int move = GetRandomMove(board, localRnd);
+        if (move != -1 && board[move] == '\0')
+        {
+            MakeMove(move);
+        }
+    }
+
     async Task TriggerComputerMoveAsync()
     {
         isAiThinking = true;
         await Task.Delay(150); 
         
         int currentVersion = gameVersion;
-        char[] boardCopy = (char[])board.Clone(); // Thread-safe snapshot
+        char[] boardCopy = (char[])board.Clone(); 
         
         int move = await Task.Run(() => ComputeBestMove(boardCopy)); 
         
-        // Pokud uživatel mezitím restartoval hru nebo změnil pole, výpočet ignorujeme
         if (currentVersion == gameVersion && !gameOver)
         {
             if(move != -1 && board[move] == '\0') MakeMove(move);
@@ -505,10 +601,9 @@ class GameEngine
         }
     }
 
-    // AI metody nyní operují VÝHRADNĚ s předaným lokalizovaným polem (currentBoard)
     int ComputeBestMove(char[] currentBoard)
     {
-        Random localRnd = new Random(); // Vlastní instance Random pro bezpečnost vláken
+        Random localRnd = new Random(); 
 
         if (AiDifficulty == Difficulty.Lehka) return GetRandomMove(currentBoard, localRnd);
 

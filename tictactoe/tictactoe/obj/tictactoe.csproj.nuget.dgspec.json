@@ -1,24 +1,20 @@
 {
   "format": 1,
   "restore": {
-    "H:\\2.ročník\\PVA\\github\\Tic-Tac-Toe-Csharp\\tictactoe\\tictactoe\\tictactoe.csproj": {}
+    "C:\\Users\\user\\RiderProjects\\Tic-Tac-Toe-Csharp\\tictactoe\\tictactoe\\tictactoe.csproj": {}
   },
   "projects": {
-    "H:\\2.ročník\\PVA\\github\\Tic-Tac-Toe-Csharp\\tictactoe\\tictactoe\\tictactoe.csproj": {
+    "C:\\Users\\user\\RiderProjects\\Tic-Tac-Toe-Csharp\\tictactoe\\tictactoe\\tictactoe.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "H:\\2.ročník\\PVA\\github\\Tic-Tac-Toe-Csharp\\tictactoe\\tictactoe\\tictactoe.csproj",
+        "projectUniqueName": "C:\\Users\\user\\RiderProjects\\Tic-Tac-Toe-Csharp\\tictactoe\\tictactoe\\tictactoe.csproj",
         "projectName": "tictactoe",
-        "projectPath": "H:\\2.ročník\\PVA\\github\\Tic-Tac-Toe-Csharp\\tictactoe\\tictactoe\\tictactoe.csproj",
-        "packagesPath": "C:\\Users\\jan.odvarka\\.nuget\\packages\\",
-        "outputPath": "H:\\2.ročník\\PVA\\github\\Tic-Tac-Toe-Csharp\\tictactoe\\tictactoe\\obj\\",
+        "projectPath": "C:\\Users\\user\\RiderProjects\\Tic-Tac-Toe-Csharp\\tictactoe\\tictactoe\\tictactoe.csproj",
+        "packagesPath": "C:\\Users\\user\\.nuget\\packages\\",
+        "outputPath": "C:\\Users\\user\\RiderProjects\\Tic-Tac-Toe-Csharp\\tictactoe\\tictactoe\\obj\\",
         "projectStyle": "PackageReference",
-        "fallbackFolders": [
-          "C:\\Program Files (x86)\\Microsoft Visual Studio\\Shared\\NuGetPackages"
-        ],
         "configFilePaths": [
-          "C:\\Users\\jan.odvarka\\AppData\\Roaming\\NuGet\\NuGet.Config",
-          "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.FallbackLocation.config",
+          "C:\\Users\\user\\AppData\\Roaming\\NuGet\\NuGet.Config",
           "C:\\Program Files (x86)\\NuGet\\Config\\Microsoft.VisualStudio.Offline.config"
         ],
         "originalTargetFrameworks": [
@@ -44,7 +40,7 @@
           "auditLevel": "low",
           "auditMode": "direct"
         },
-        "SdkAnalysisLevel": "9.0.200"
+        "SdkAnalysisLevel": "10.0.100"
       },
       "frameworks": {
         "net9.0-windows7.0": {
@@ -60,6 +56,24 @@
           ],
           "assetTargetFallback": true,
           "warn": true,
+          "downloadDependencies": [
+            {
+              "name": "Microsoft.AspNetCore.App.Ref",
+              "version": "[9.0.11, 9.0.11]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Host.win-x64",
+              "version": "[9.0.11, 9.0.11]"
+            },
+            {
+              "name": "Microsoft.NETCore.App.Ref",
+              "version": "[9.0.11, 9.0.11]"
+            },
+            {
+              "name": "Microsoft.WindowsDesktop.App.Ref",
+              "version": "[9.0.11, 9.0.11]"
+            }
+          ],
           "frameworkReferences": {
             "Microsoft.NETCore.App": {
               "privateAssets": "all"
@@ -68,7 +82,7 @@
               "privateAssets": "none"
             }
           },
-          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\9.0.201/PortableRuntimeIdentifierGraph.json"
+          "runtimeIdentifierGraphPath": "C:\\Program Files\\dotnet\\sdk\\10.0.100/PortableRuntimeIdentifierGraph.json"
         }
       }
     }
